@@ -14,7 +14,11 @@ impl<K: Hash + Eq, V> ConcurrentMultiMap<K, V> {
     // TODO:
     // Create a new empty ConcurrentMultiMap with the given number of buckets.
     pub fn new(bucket_count: usize) -> Self {
-        todo!()
+        let buckets = (0..bucket_count)
+            .map(|_| RwLock::new(LinkedList::new()))
+            .collect();
+        
+        ConcurrentMultiMap { buckets }
     }
 }
 
@@ -26,7 +30,24 @@ impl<K: Hash + Eq, V: Clone + Eq> ConcurrentMultiMap<K, V> {
     // key-values pair already exists. If it does, return early. Otherwise, add the key-value pair
     // to the linked list.
     pub fn set(&self, key: K, value: V) {
-        todo!()
+        // Hash the key to find the bucket index
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        let hash = hasher.finish();
+        let bucket_index = (hash % self.buckets.len() as u64) as usize;
+    
+        // Acquire write lock for the bucket
+        let mut bucket = self.buckets[bucket_index].write().unwrap();
+    
+        // Check if the key-value pair already exists
+        for (existing_key, existing_value) in bucket.iter() {
+            if *existing_key == key && *existing_value == value {              
+                return;
+            }
+        }
+    
+        // If not, insert the new key-value pair
+        bucket.push_back((key, value));
     }
 
     // TODO:
@@ -39,7 +60,26 @@ impl<K: Hash + Eq, V: Clone + Eq> ConcurrentMultiMap<K, V> {
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        todo!()
+        // Hash the key to find the bucket index
+        let mut hasher = DefaultHasher::new();
+        key.hash(&mut hasher);
+        let hash = hasher.finish();
+        let bucket_index = (hash % self.buckets.len() as u64) as usize;
+
+        // Acquire read lock for the bucket
+        let bucket = self.buckets[bucket_index].read().unwrap();
+
+        // Collect all values associated with the key by cloning them
+        bucket
+            .iter()
+            .filter_map(|(existing_key, value)| {
+                if existing_key.borrow() == key {
+                    Some(value.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 

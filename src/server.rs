@@ -8,6 +8,8 @@ use std::sync::{
     Arc,
 };
 use std::thread;
+use std::time::Duration;
+
 
 /// The number of workers in the server's thread pool
 const WORKERS: usize = 16;
@@ -19,7 +21,28 @@ const WORKERS: usize = 16;
 // and then creating the appropriate response and turning it into bytes which are sent to along
 // the stream by calling the `write_all` method.
 fn process_message(state: Arc<ServerState>, request: Request, mut stream: TcpStream) {
-    todo!()
+    let response = match request {
+        Request::Publish { doc } => {
+            let id = state.database.publish(doc);
+            Response::PublishSuccess(id)
+        }
+        Request::Search { word } => {
+            let indices = state.database.search(&word);
+            Response::SearchSuccess(indices)
+        }
+        Request::Retrieve { id } => {
+            match state.database.retrieve(id) {
+                Some(doc) => Response::RetrieveSuccess(doc),
+                None => Response::Failure,
+            }
+        }
+    };
+
+    // Convert the response to bytes and send it over the stream
+    let response_bytes = response.to_bytes();
+    if stream.write_all(&response_bytes).is_err() {
+        eprintln!("Failed to send response to client.");
+    }
 }
 
 /// A struct that contains the state of the server
@@ -48,7 +71,9 @@ impl Server {
     // TODO:
     // Create a new server by using the `ServerState::new` function
     pub fn new() -> Self {
-        todo!()
+        Server {
+            state: Arc::new(ServerState::new()),
+        }
     }
 
     // TODO:
@@ -67,7 +92,38 @@ impl Server {
     // `ServerState` to see if the server has been stopped. If it has, you should break out of the
     // loop and return.
     fn listen(&self, port: u16) {
-        todo!()
+        let listener = TcpListener::bind(("127.0.0.1", port)).expect("Failed to bind to port");
+        println!("Server listening on port {}", port);
+        listener.set_nonblocking(true).expect("Cannot set non-blocking");
+
+        for stream in listener.incoming() {
+            // Check if the server has been stopped
+            if self.state.is_stopped.load(Ordering::SeqCst) {
+                return;
+            }
+
+            match stream {
+                Ok(stream) => {
+                    let state = Arc::clone(&self.state);
+                    self.state.pool.execute(move || {
+                        // Read and parse the request from the client
+                        let request = Request::from_bytes(&stream);
+                        if let Some(request) = request {
+                            process_message(state, request, stream);
+                        } else {
+                            eprintln!("Failed to parse client request.");
+                        }
+                    });
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // No connection available, sleep briefly before retrying
+                    thread::sleep(Duration::from_millis(100));
+                }
+                Err(e) => {
+                    eprintln!("Failed to accept connection: {}", e);
+                }
+            }
+        }
     }
 
     // This function has already been partially completed for you
@@ -86,8 +142,12 @@ impl Server {
         }
 
         // TODO: Call the listen function and then loop (doing nothing) until the server has been stopped
-        todo!()
+        self.listen(port);
+        while !self.state.is_stopped.load(Ordering::SeqCst) {
+            thread::sleep(std::time::Duration::from_millis(100));
+        }
     }
+
     pub fn stop(&self) {
         self.state.is_stopped.store(true, Ordering::SeqCst);
     }

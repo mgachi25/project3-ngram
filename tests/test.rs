@@ -352,7 +352,8 @@ mod integration {
 
         let queue = Arc::new(Mutex::new(paths));
         println!("Adding docs...");
-        let now = std::time::Instant::now();
+        // 'now' is not used, so adding underscore to avoid compiler warnings
+        let _now = std::time::Instant::now();
         let handles = (0..THREADS)
             .map(|i| {
                 thread::spawn({
